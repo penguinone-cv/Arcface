@@ -10,11 +10,9 @@ from logger import Logger                                                       
 from data_loader import DataLoader                                                  #自作(データ読み込みに使用)
 from parameter_loader import read_parameters, str_to_bool                           #自作(パラメータ読み込みに使用)
 
-
+# 学習全体を管理するクラス
 class Trainer:
-    '''学習全体を管理するクラス'''
     def __init__(self, setting_csv_path, index):
-        '''初期化時に実行'''
         self.parameters_dict = read_parameters(setting_csv_path, index)                             #全ハイパーパラメータが保存されたディクショナリ
         self.model_name = self.parameters_dict["model_name"]                                        #モデル名
         self.log_dir_name = self.model_name + "_epochs" + self.parameters_dict["epochs"] \
@@ -32,8 +30,8 @@ class Trainer:
         self.num_class = int(self.parameters_dict["num_class"])                                     #クラス数
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")                  #GPUが利用可能であればGPUを利用
-        #self.model = VGG_based(self.num_class).to(self.device)                                     #ネットワークを定義(VGG)
-        self.model = ResNet_based(self.num_class).to(self.device)                                   #ネットワークを定義(ResNet)
+        #self.model = VGG_based(self.num_class).to(self.device)                                     #ネットワークを定義(VGGベース)
+        self.model = ResNet_based(self.num_class).to(self.device)                                   #ネットワークを定義(ResNetベース)
         #学習済み重みファイルがあるか確認しあれば読み込み
         if os.path.isfile(os.path.join(self.log_path, self.model_name, self.model_name)):
             print("Trained weight file exists")
@@ -73,37 +71,35 @@ class Trainer:
                                       num_workers=self.num_workers, pin_memory=str_to_bool(self.parameters_dict["pin_memory"]))
 
 
-
-
-    #def middle_layer_model(self, model):
-    #    middle_layer = [layer.output for layer in model.layers[2:20]]
-    #    activation_model = Model
-
+    # 学習を行う関数
     def train(self):
-        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.benchmark = True                   # 学習の計算再現性が保証されない代わりに高速化を図る(研究用途でないためTrueとする)
         print("Train phase")
         print("Train", self.model_name)
 
-        epochs = int(self.parameters_dict["epochs"])
+        epochs = int(self.parameters_dict["epochs"])            # epoch数
 
+        # 学習ループ開始(tqdmによって進捗を表示する)
         with tqdm(range(epochs)) as pbar:
             for epoch in enumerate(pbar):
-                i = epoch[0]
-                pbar.set_description("[Epoch %d]" % (i+1))
-                loss_result = 0.0
-                acc = 0.0
-                val_loss_result = 0.0
-                val_acc = 0.0
+                i = epoch[0]                                    # 現在のepoch
+                pbar.set_description("[Epoch %d]" % (i+1))      # プログレスバーのタイトル部分の表示を変更
+                loss_result = 0.0                               # Lossを保存しておく
+                acc = 0.0                                       # Accuracyの計算に使用
+                val_loss_result = 0.0                           # Validation Lossを保存しておく
+                val_acc = 0.0                                   # Validation Accuracyの計算に使用
 
-                self.model.train()
-                j = 1
-                for inputs, labels in self.data_loader.dataloaders["train"]:
-                    pbar.set_description("[Epoch %d (Iteration %d)]" % ((i+1), j))
-                    inputs = inputs.to(self.device, non_blocking=True)
-                    labels = torch.tensor(labels).to(self.device, non_blocking=True)
-                    outputs = self.model(inputs)
-                    loss = self.loss(outputs, labels)
+                self.model.train()                              # モデルをtrainモード(重みが変更可能な状態)にする
+                j = 1                                           # 現在のiterationを保存しておく変数
+                for inputs, labels in self.data_loader.dataloaders["train"]:            # イテレータからミニバッチを順次読み出す
+                    pbar.set_description("[Epoch %d (Iteration %d)]" % ((i+1), j))      # 現在のiterationをプログレスバーに表示
+                    inputs = inputs.to(self.device, non_blocking=True)                  # 入力データをGPUメモリに送る(non_blocking=Trueによってasynchronous GPU copiesが有効になりCPUのPinned MemoryからGPUにデータを送信中でもCPUが動作できる)
+                    labels = torch.tensor(labels).to(self.device, non_blocking=True)    # 教師ラベルをGPUメモリに送る
+                    outputs = self.model(inputs)                                        # モデルにデータを入力し出力を得る
+                    loss = self.loss(outputs, labels)                                   # 教師ラベルとの損失を計算
 
+                    # ArcFaceLossから出力を取り出してAccuracyを計算する
+                    # 参考: https://github.com/KevinMusgrave/pytorch-metric-learning/issues/175
                     mask = self.loss.get_target_mask(outputs, labels)
                     cosine = self.loss.get_cosine(outputs)
                     cosine_of_target_classes = cosine[mask == 1]
@@ -112,9 +108,12 @@ class Trainer:
                     logits = cosine + (mask*diff)
                     logits = self.loss.scale_logits(logits, outputs)
                     pred = logits.argmax(dim=1, keepdim=True)
-                    for img_index in range(len(pred)):
-                        if labels[img_index] == 1:
-                            acc += 1.
+                    if j == 1:
+                        print(len(pred))
+                        for img_index in range(len(pred)):
+                            print(labels[img_index])
+                            if labels[img_index] == 1:
+                                acc += 1.
 
                     self.optimizer.zero_grad()
                     loss.backward()

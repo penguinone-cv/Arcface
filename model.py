@@ -1,13 +1,35 @@
-import torch
-import torch.nn.functional as F
-import torch.nn as nn
+import torch                        # モデル定義に使用
+import torch.nn.functional as F     # GAPの定義時に使用
+import torch.nn as nn               # 各モジュールの宣言に使用
 
-#CNN部分の定義クラス
+# モデル定義(VGGベースモデル)
 class VGG_based(nn.Module):
 
     def __init__(self, num_class):
         super().__init__()
-        #入力がカラー画像であれば3次元
+        # 畳み込み，Batch Normalization，ReLUを3回ずつ行うものを1ブロックとし，ブロックの最後にMaxPoolingによって解像度を落とす
+        # VGG NetにはBatch Normalizationは含まれていないが，学習の効率化/安定化/精度向上が期待できるため導入
+        #
+        # Conv2d(input_channel, output_channel, kernel_size, padding)
+        # 畳み込みを行うモジュール
+        # input_channel     : 入力チャネル数
+        # output_channel    : 出力チャネル数
+        # kernel_size       : 畳み込みカーネルの大きさ(intを入力すると(int, int)のタプルとして認識される)
+        # padding           : 縁の画素に対する畳み込みを行うためのpaddingを行うか(1以上で指定した数字分だけ画像の周囲に画素値0の画素を追加する)
+        #
+        # BatchNorm2d(channel)
+        # Batch Normalizationを行うモジュール
+        # Batch Normalization : ミニバッチ内のデータを平均0，標準偏差1になるように正規化を行うこと
+        # channel           : 入力チャネル数
+        #
+        # ReLU(inplace)
+        # 活性化関数ReLUをかけるモジュール
+        # inplace           : 出力の保存のために入力の変数を用いるか(x = func(x)を許容するか)
+        #
+        # MaxPool2d(kernel_size, stride)
+        # Max Poolingを行うモジュール
+        # kernel_size       : 比較を行う際に見る範囲(カーネルサイズ)の大きさ
+        # stride            : カーネルを何画素移動するか
         self.feature_extractor = nn.Sequential(
             nn.Conv2d(3, 64, 3, padding=1),     #input:144×144×1      output:144×144×64
             nn.BatchNorm2d(64),
@@ -54,6 +76,12 @@ class VGG_based(nn.Module):
             nn.MaxPool2d(kernel_size=2, stride=2),
         )
 
+        # 全結合層
+        #
+        # Linear(input_dim, output_dim)
+        # 全結合層
+        # input_dim     : 入力の次元数(全結合層は1次元配列が入力のため次元数はintでいい)
+        # output_dim    : 出力の次元数
         self.linear = nn.Sequential(
             nn.Linear(9*9*512, 2048),              #input:9×9×256(1dim vec)    output:1×1×2058
             nn.ReLU(inplace = True),
@@ -63,21 +91,28 @@ class VGG_based(nn.Module):
             nn.ReLU(inplace = True),
         )
 
+        # クラス分類器(ArcFaceLossに含まれるため今回は使わない)
         self.classifier = nn.Linear(512, num_class)
 
-    #順伝播
+    # 順伝播
+    # 逆伝播は自動でやってくれる
     def forward(self, x):
-        x = self.feature_extractor(x)
-        #Fully connected layers
-        x = x.view(-1, 9*9*512)     #convert to 1dim vector
-        x = self.linear(x)
+        x = self.feature_extractor(x)   # 特徴抽出
+        x = x.view(-1, 9*9*512)         # 1次元配列に変更
+        x = self.linear(x)              # 全結合層へ入力
         #x = self.classifier(x)
 
         return x
 
+# モデル定義(ResNet50ベース)
 class ResNet_based(nn.Module):
     def __init__(self, num_classes):
         super().__init__()
+        # Skip Connectionにより計算されない情報を送ることで層を重ねることによる初めの方の情報の欠落を防ぐ
+        # 加えてデータの流れが分岐するため疑似的なアンサンブルモデルと捉えることが可能
+        # 実装はhttps://www.bigdata-navi.com/aidrops/2611/を参考に行った
+        #
+        # 畳み込みを1回挿む
         self.head = nn.Sequential(
             nn.Conv2d(3, 64, 3, padding=1),
             nn.BatchNorm2d(64),
@@ -104,10 +139,11 @@ class ResNet_based(nn.Module):
         self.block4 = nn.ModuleList([
             self._building_block(2048) for _ in range(3)
         ])
-        self.avg_pool = GlobalAvgPool2d()
+        self.avg_pool = GlobalAvgPool2d()                           # x.viewの代わりにGAPを使用
         self.fc = nn.Linear(2048, 512)
-        self.out = nn.Linear(512, num_classes)
+        self.out = nn.Linear(512, num_classes)                      # ArcFaceLossに含まれるため今回は使わない
 
+    # 順伝播
     def forward(self, x):
         x = self.head(x)
         x = self.block0(x)
@@ -136,6 +172,8 @@ class ResNet_based(nn.Module):
         return ResBlock(channel_in, channel_out)
 
 
+# ResNetを構成するブロックを生成するクラス
+# 実装はhttps://www.bigdata-navi.com/aidrops/2611/を参考に行った
 class ResBlock(nn.Module):
     def __init__(self, channel_in, channel_out):
         super().__init__()
@@ -169,7 +207,7 @@ class ResBlock(nn.Module):
     def _projection(self, channel_in, channel_out):
         return nn.Conv2d(channel_in, channel_out, 1, padding=0)
 
-
+# GAPを計算するクラス
 class GlobalAvgPool2d(nn.Module):
     def __init__(self):
         super().__init__()

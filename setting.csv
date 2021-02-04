@@ -1,5 +1,5 @@
 ﻿model_name,base_log_path,data_path,width,height,num_class,train_ratio,num_workers,pin_memory,epochs,batch_size,learning_rate,momentum,weight_decay,margin,scale
-arcface,./logs,/home/data/LFW/lfw,144,144,5749,0.8,8,TRUE,200,64,0.01,0.9,1.00E-06,0.5,64
+arcface,./logs,/home/data/LFW/lfw,144,144,5749,0.8,8,TRUE,1,64,0.01,0.9,1.00E-06,0.5,64
 arcface,./logs,/home/data/LFW/lfw,144,144,5749,0.8,8,TRUE,200,64,0.02,0.9,1.00E-06,0.5,64
 arcface,./logs,/home/data/LFW/lfw,144,144,5749,0.8,8,TRUE,200,64,0.03,0.9,1.00E-06,0.5,64
 arcface,./logs,/home/data/LFW/lfw,144,144,5749,0.8,8,TRUE,200,64,0.05,0.9,1.00E-06,0.5,64
