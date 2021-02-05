@@ -33,9 +33,9 @@ class Trainer:
         #self.model = VGG_based(self.num_class).to(self.device)                                     #ネットワークを定義(VGGベース)
         self.model = ResNet_based(self.num_class).to(self.device)                                   #ネットワークを定義(ResNetベース)
         #学習済み重みファイルがあるか確認しあれば読み込み
-        if os.path.isfile(os.path.join(self.log_path, self.model_name, self.model_name)):
+        if os.path.isfile(os.path.join(self.log_path, self.model_name)):
             print("Trained weight file exists")
-            self.trunk.load_state_dict(torch.load(os.path.join(self.log_path, self.model_name)))
+            self.model.load_state_dict(torch.load(os.path.join(self.log_path, self.model_name)))
 
         #CNN部分の最適化手法の定義
         #ArcFaceLoss
@@ -49,6 +49,8 @@ class Trainer:
                                         num_classes=self.num_class,
                                         embedding_size=512).to(self.device)
         self.optimizer = torch.optim.Adam(list(self.model.parameters()) + list(self.loss.parameters()), lr=self.learning_rate)      #PMLのArcFaceLossにはMLPが含まれている(Trainable)なのでモデルパラメータとlossに含まれるモデルパラメータを最適化
+        self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.95)
+
 
         #バッチ読み込みをいくつのスレッドに並列化するか指定
         #パラメータ辞書に"-1"と登録されていればCPUのコア数を読み取って指定
@@ -94,7 +96,8 @@ class Trainer:
                 for inputs, labels in self.data_loader.dataloaders["train"]:            # イテレータからミニバッチを順次読み出す
                     pbar.set_description("[Epoch %d (Iteration %d)]" % ((i+1), j))      # 現在のiterationをプログレスバーに表示
                     inputs = inputs.to(self.device, non_blocking=True)                  # 入力データをGPUメモリに送る(non_blocking=Trueによってasynchronous GPU copiesが有効になりCPUのPinned MemoryからGPUにデータを送信中でもCPUが動作できる)
-                    labels = torch.tensor(labels).to(self.device, non_blocking=True)    # 教師ラベルをGPUメモリに送る
+                    labels = labels.clone().detach()
+                    labels = labels.to(self.device, non_blocking=True)                  # 教師ラベルをGPUメモリに送る
                     outputs = self.model(inputs)                                        # モデルにデータを入力し出力を得る
                     loss = self.loss(outputs, labels)                                   # 教師ラベルとの損失を計算
 
@@ -108,12 +111,9 @@ class Trainer:
                     logits = cosine + (mask*diff)
                     logits = self.loss.scale_logits(logits, outputs)
                     pred = logits.argmax(dim=1, keepdim=True)
-                    if j == 1:
-                        print(len(pred))
-                        for img_index in range(len(pred)):
-                            print(labels[img_index])
-                            if labels[img_index] == 1:
-                                acc += 1.
+                    for img_index in range(len(labels)):
+                        if pred[img_index, 0] == labels[img_index]:
+                            acc += 1.
 
                     self.optimizer.zero_grad()
                     loss.backward()
@@ -133,7 +133,8 @@ class Trainer:
                         pbar.set_description("[Epoch %d (Validation)]" % (i+1))
                         for val_inputs, val_labels in self.data_loader.dataloaders["val"]:
                             val_inputs = val_inputs.to(self.device, non_blocking=True)
-                            val_labels = torch.tensor(val_labels).to(self.device, non_blocking=True)
+                            val_labels = val_labels.clone().detach()
+                            val_labels = val_labels.to(self.device, non_blocking=True)
                             val_outputs = self.model(val_inputs)
                             val_loss = self.loss(val_outputs, val_labels)
 
@@ -148,8 +149,8 @@ class Trainer:
                             logits = cosine + (mask*diff)
                             logits = self.loss.scale_logits(logits, val_outputs)
                             pred = logits.argmax(dim=1, keepdim=True)
-                            for img_index in range(len(pred)):
-                                if labels[img_index] == 1:
+                            for img_index in range(len(val_labels)):
+                                if pred[img_index, 0] == val_labels[img_index]:
                                     val_acc += 1.
 
                     epoch_loss = loss_result / len(self.data_loader.dataloaders["train"].dataset)
@@ -159,6 +160,7 @@ class Trainer:
                     self.logger.collect_history(loss=epoch_loss, accuracy=epoch_acc, val_loss=val_epoch_loss, val_accuracy=val_epoch_acc)
                     self.logger.writer.add_scalars("losses", {"train":epoch_loss,"validation":val_epoch_loss}, (i+1))
                     self.logger.writer.add_scalars("accuracies", {"train":epoch_acc, "validation":val_epoch_acc}, (i+1))
+                    self.scheduler.step()
 
                 pbar.set_postfix({"loss":epoch_loss, "accuracy": epoch_acc, "val_loss":val_epoch_loss, "val_accuracy": val_epoch_acc})
 

@@ -30,7 +30,7 @@ def main():
     setting_csv_path = "./setting.csv"                                  # パラメータが保存されたcsvファイルのパスを指定
     trainer = Trainer(setting_csv_path=setting_csv_path, index=index)   # 学習のうんぬんかんぬんを管理するクラスを変数として宣言
     # 学習済みファイルが存在しない場合のみ学習を行う(パラメータチューニングの際に既に試したパラメータをスキップするため)
-    if not os.path.isfile(os.path.join(trainer.log_path, trainer.log_dir_name, trainer.model_name)):
+    if not os.path.isfile(os.path.join(trainer.log_path, trainer.model_name)):
         print("Trained weight file does not exist")
         trainer.train()
 

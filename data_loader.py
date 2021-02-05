@@ -55,17 +55,17 @@ class DataLoader:
 
         # 学習データの読み込みを行うイテレータ
         # shuffle    :学習データの順番をランダムに入れ替えるか(固定すると順番を記憶してしまう可能性があるためTrueにする)
-        train_loader = torch.utils.data.DataLoader(train_data,
-                                                    batch_size=self.batch_size,
-                                                    shuffle=True,
-                                                    num_workers=num_workers,
-                                                    pin_memory=pin_memory)
+        train_loader = utils.data.DataLoader(train_data,
+                                                batch_size=self.batch_size,
+                                                shuffle=True,
+                                                num_workers=num_workers,
+                                                pin_memory=pin_memory)
         # 検証データの読み込みを行うイテレータ
         # 検証データは学習を行わないためシャッフルは必要ない
-        val_loader = torch.utils.data.DataLoader(val_data,
-                                                    batch_size=self.batch_size,
-                                                    shuffle=False,
-                                                    num_workers=num_workers,
-                                                    pin_memory=pin_memory)
+        val_loader = utils.data.DataLoader(val_data,
+                                                batch_size=self.batch_size,
+                                                shuffle=False,
+                                                num_workers=num_workers,
+                                                pin_memory=pin_memory)
         dataloaders = {"train":train_loader, "val":val_loader}                          # それぞれのデータローダーをディクショナリに保存
         return dataloaders
