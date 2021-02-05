@@ -49,7 +49,7 @@ class Trainer:
                                         num_classes=self.num_class,
                                         embedding_size=512).to(self.device)
         self.optimizer = torch.optim.Adam(list(self.model.parameters()) + list(self.loss.parameters()), lr=self.learning_rate)      #PMLのArcFaceLossにはMLPが含まれている(Trainable)なのでモデルパラメータとlossに含まれるモデルパラメータを最適化
-        self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.95)
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=self.optimizer, mode='min', factor=1e-6, patience=5, eps=1e-9)
 
 
         #バッチ読み込みをいくつのスレッドに並列化するか指定
@@ -160,7 +160,8 @@ class Trainer:
                     self.logger.collect_history(loss=epoch_loss, accuracy=epoch_acc, val_loss=val_epoch_loss, val_accuracy=val_epoch_acc)
                     self.logger.writer.add_scalars("losses", {"train":epoch_loss,"validation":val_epoch_loss}, (i+1))
                     self.logger.writer.add_scalars("accuracies", {"train":epoch_acc, "validation":val_epoch_acc}, (i+1))
-                    self.scheduler.step()
+                    self.logger.writer.add_scalars("learning_rate", {"learning_rate":self.optimizer.param_groups[0]['lr']}, (i+1))
+                    self.scheduler.step(val_epoch_loss)
 
                 pbar.set_postfix({"loss":epoch_loss, "accuracy": epoch_acc, "val_loss":val_epoch_loss, "val_accuracy": val_epoch_acc})
 
