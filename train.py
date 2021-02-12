@@ -1,37 +1,39 @@
-import torch                                                                        #pytorchを使用(モデル定義及び学習フロー等)
-import torch.nn as nn                                                               #torchライブラリ内のnnパッケージ
-import numpy as np                                                                  #numpy(行列計算に使用)
-import os                                                                           #パス作成とCPUのコア数読み込みに使用
+import torch                                                                        # pytorchを使用(モデル定義及び学習フロー等)
+import torch.nn as nn                                                               # torchライブラリ内のnnパッケージ
+import numpy as np                                                                  # numpy(行列計算に使用)
+import os                                                                           # パス作成とCPUのコア数読み込みに使用
 import math
-from pytorch_metric_learning import losses                                          #Loss関数の呼び出しに使用
-from tqdm import tqdm                                                               #学習の進捗表示に使用
-from model import VGG_based, ResNet_based                                           #自作(モデル定義に使用)
-from logger import Logger                                                           #自作(ログ保存に使用)
-from data_loader import DataLoader                                                  #自作(データ読み込みに使用)
-from parameter_loader import read_parameters, str_to_bool                           #自作(パラメータ読み込みに使用)
+from pytorch_metric_learning import losses                                          # Loss関数の呼び出しに使用
+from tqdm import tqdm                                                               # 学習の進捗表示に使用
+from model import VGG_based, ResNet_based, PretrainedResNet                         # 自作(モデル定義に使用)
+from logger import Logger                                                           # 自作(ログ保存に使用)
+from data_loader import DataLoader                                                  # 自作(データ読み込みに使用)
+from parameter_loader import read_parameters, str_to_bool                           # 自作(パラメータ読み込みに使用)
 
 # 学習全体を管理するクラス
 class Trainer:
     def __init__(self, setting_csv_path, index):
-        self.parameters_dict = read_parameters(setting_csv_path, index)                             #全ハイパーパラメータが保存されたディクショナリ
-        self.model_name = self.parameters_dict["model_name"]                                        #モデル名
-        self.log_dir_name = self.model_name + "_epochs" + self.parameters_dict["epochs"] \
+        self.parameters_dict = read_parameters(setting_csv_path, index)                             # 全ハイパーパラメータが保存されたディクショナリ
+        self.model_name = self.parameters_dict["model_name"]                                        # モデル名
+        log_dir_name = self.model_name + "_epochs" + self.parameters_dict["epochs"] \
                             + "_batch_size" + self.parameters_dict["batch_size"] \
                             + "_lr" + self.parameters_dict["learning_rate"] \
                             + "_margin" + self.parameters_dict["margin"] \
-                            + "_scale" + self.parameters_dict["scale"]                              #ログを保存するフォルダ名
-        self.log_path = os.path.join(self.parameters_dict["base_log_path"], self.log_dir_name)      #ログの保存先
-        self.batch_size = int(self.parameters_dict["batch_size"])                                   #バッチサイズ
-        self.learning_rate = float(self.parameters_dict["learning_rate"])                           #学習率
-        self.momentum = float(self.parameters_dict["momentum"])                                     #慣性項(SGD使用時のみ使用)
-        self.weight_decay = float(self.parameters_dict["weight_decay"])                             #重み減衰(SGD使用時のみ使用)
-        self.img_size = (int(self.parameters_dict["width"]),int(self.parameters_dict["height"]))    #画像サイズ
-        self.logger = Logger(self.log_path)                                                         #ログ書き込みを行うLoggerクラスの宣言
-        self.num_class = int(self.parameters_dict["num_class"])                                     #クラス数
+                            + "_scale" + self.parameters_dict["scale"]                              # ログを保存するフォルダ名
+        self.log_path = os.path.join(self.parameters_dict["base_log_path"], log_dir_name)           # ログの保存先
+        batch_size = int(self.parameters_dict["batch_size"])                                        # バッチサイズ
+        learning_rate = float(self.parameters_dict["learning_rate"])                                # 学習率
+        momentum = float(self.parameters_dict["momentum"])                                          # 慣性項(SGD使用時のみ使用)
+        weight_decay = float(self.parameters_dict["weight_decay"])                                  # 重み減衰(SGD使用時のみ使用)
+        img_size = (int(self.parameters_dict["width"]),int(self.parameters_dict["height"]))         # 画像サイズ
+        self.logger = Logger(self.log_path)                                                         # ログ書き込みを行うLoggerクラスの宣言
+        num_class = int(self.parameters_dict["num_class"])                                          # クラス数
+        step_size = int(self.parameters_dict["step_size"])
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")                  #GPUが利用可能であればGPUを利用
-        #self.model = VGG_based(self.num_class).to(self.device)                                     #ネットワークを定義(VGGベース)
-        self.model = ResNet_based(self.num_class).to(self.device)                                   #ネットワークを定義(ResNetベース)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")                  # GPUが利用可能であればGPUを利用
+        #self.model = VGG_based(num_class).to(self.device)                                          # ネットワークを定義(VGGベース)
+        #self.model = ResNet_based(num_class).to(self.device)                                       # ネットワークを定義(ResNetベース)
+        self.model = PretrainedResNet(num_class).to(self.device)                                    # ネットワークを定義(学習済みResNetベース)
         #学習済み重みファイルがあるか確認しあれば読み込み
         if os.path.isfile(os.path.join(self.log_path, self.model_name)):
             print("Trained weight file exists")
@@ -46,20 +48,22 @@ class Trainer:
         #embedding_size : 同上
         self.loss = losses.ArcFaceLoss(margin=float(self.parameters_dict["margin"]),
                                         scale=int(self.parameters_dict["scale"]),
-                                        num_classes=self.num_class,
+                                        num_classes=num_class,
                                         embedding_size=512).to(self.device)
-        self.optimizer = torch.optim.Adam(list(self.model.parameters()) + list(self.loss.parameters()), lr=self.learning_rate)      #PMLのArcFaceLossにはMLPが含まれている(Trainable)なのでモデルパラメータとlossに含まれるモデルパラメータを最適化
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=self.optimizer, mode='min', factor=1e-6, patience=5, eps=1e-9)
+        #self.optimizer = torch.optim.Adam(list(self.model.parameters()) + list(self.loss.parameters()), lr=self.learning_rate)      # PMLのArcFaceLossにはMLPが含まれている(Trainable)なのでモデルパラメータとlossに含まれるモデルパラメータを最適化
+        self.optimizer = torch.optim.SGD(list(self.model.parameters()) + list(self.loss.parameters()), lr=learning_rate,
+                                            momentum=momentum, weight_decay=weight_decay, nesterov=True)                  # PMLのArcFaceLossにはMLPが含まれている(Trainable)なのでモデルパラメータとlossに含まれるモデルパラメータを最適化
+        self.scheduler = torch.optim.lr_scheduler.StepLR(optimizer=self.optimizer, step_size=step_size, gamma=0.1)
 
 
         #バッチ読み込みをいくつのスレッドに並列化するか指定
         #パラメータ辞書に"-1"と登録されていればCPUのコア数を読み取って指定
-        self.num_workers = 0
+        num_workers = 0
         if int(self.parameters_dict["num_workers"]) == -1:
             print("set num_workers to number of cpu cores :", os.cpu_count())
-            self.num_workers = os.cpu_count()
+            num_workers = os.cpu_count()
         else:
-            self.num_workers = int(self.parameters_dict["num_workers"])
+            num_workers = int(self.parameters_dict["num_workers"])
 
         #データローダーの定義
         #data_path : データの保存先
@@ -68,9 +72,9 @@ class Trainer:
         #train_ratio : 全データ中学習に使用するデータの割合
         self.data_loader = DataLoader(data_path=self.parameters_dict["data_path"],
                                       batch_size=int(self.parameters_dict["batch_size"]),
-                                      img_size=self.img_size,
+                                      img_size=img_size,
                                       train_ratio=float(self.parameters_dict["train_ratio"]),
-                                      num_workers=self.num_workers, pin_memory=str_to_bool(self.parameters_dict["pin_memory"]))
+                                      num_workers=num_workers, pin_memory=str_to_bool(self.parameters_dict["pin_memory"]))
 
 
     # 学習を行う関数
@@ -99,6 +103,7 @@ class Trainer:
                     labels = labels.clone().detach()
                     labels = labels.to(self.device, non_blocking=True)                  # 教師ラベルをGPUメモリに送る
                     outputs = self.model(inputs)                                        # モデルにデータを入力し出力を得る
+                    #print(outputs.shape())
                     loss = self.loss(outputs, labels)                                   # 教師ラベルとの損失を計算
 
                     # ArcFaceLossから出力を取り出してAccuracyを計算する

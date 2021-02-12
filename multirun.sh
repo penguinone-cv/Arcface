@@ -4,7 +4,7 @@ function terminate() {
 }
 trap 'terminate' {1,2,3,15}
 
-for ((i=0 ; i<5 ; i++))
+for ((i=0 ; i<10 ; i++))
 do
   python main.py $i
 done

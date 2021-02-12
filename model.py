@@ -1,12 +1,17 @@
 import torch                        # モデル定義に使用
 import torch.nn.functional as F     # GAPの定義時に使用
 import torch.nn as nn               # 各モジュールの宣言に使用
+from torchvision import models
+
+# モデルの定義をまとめたファイル
+# 実装：VGGベースモデル，ResNet50ベースモデル，学習済みResNet50ベースモデル
 
 # モデル定義(VGGベースモデル)
 class VGG_based(nn.Module):
 
     def __init__(self, num_class):
-        super().__init__()
+        super().__init__()      #スーパークラスの初期化関数を実行(実行しないとモジュールの宣言時にエラーが発生する)
+
         # 畳み込み，Batch Normalization，ReLUを3回ずつ行うものを1ブロックとし，ブロックの最後にMaxPoolingによって解像度を落とす
         # VGG NetにはBatch Normalizationは含まれていないが，学習の効率化/安定化/精度向上が期待できるため導入
         #
@@ -77,7 +82,8 @@ class VGG_based(nn.Module):
         )
 
         # 全結合層
-        #
+        # 多層パーセプトロンにより必要な特徴の重み付けを行い識別を行う
+        # 多層なので非線形識別が可能
         # Linear(input_dim, output_dim)
         # 全結合層
         # input_dim     : 入力の次元数(全結合層は1次元配列が入力のため次元数はintでいい)
@@ -208,9 +214,34 @@ class ResBlock(nn.Module):
         return nn.Conv2d(channel_in, channel_out, 1, padding=0)
 
 # GAPを計算するクラス
+# 実装はhttps://www.bigdata-navi.com/aidrops/2611/を参考に行った
 class GlobalAvgPool2d(nn.Module):
     def __init__(self):
         super().__init__()
 
     def forward(self, x):
         return F.avg_pool2d(x, kernel_size=x.size()[2:]).view(-1, x.size(1))
+
+
+# 学習済みResNet50を利用(全結合層のみ定義し直し)
+# torchvisionに含まれるResNet50学習済みモデルを使用
+# 実装はhttps://pytorch.org/vision/0.8/_modules/torchvision/models/resnet.htmlを参考に行った
+class PretrainedResNet(nn.Module):
+    def __init__(self, embedding_size):
+        super().__init__()
+        self.pretrained_resnet = models.resnet50(pretrained=True)
+        self.fc = nn.Linear(2048, 512)                              #学習済みresnetの全結合層のみ入れ替え
+
+    def forward(self, x):
+        x = self.pretrained_resnet.conv1(x)
+        x = self.pretrained_resnet.bn1(x)
+        x = self.pretrained_resnet.relu(x)
+        x = self.pretrained_resnet.maxpool(x)
+        x = self.pretrained_resnet.layer1(x)
+        x = self.pretrained_resnet.layer2(x)
+        x = self.pretrained_resnet.layer3(x)
+        x = self.pretrained_resnet.layer4(x)
+        x = self.pretrained_resnet.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.fc(x)                          #最終的なclassifierはArcFaceLossに含まれるため省略
+        return x
