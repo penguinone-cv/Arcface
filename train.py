@@ -166,7 +166,7 @@ class Trainer:
                     self.logger.writer.add_scalars("losses", {"train":epoch_loss,"validation":val_epoch_loss}, (i+1))
                     self.logger.writer.add_scalars("accuracies", {"train":epoch_acc, "validation":val_epoch_acc}, (i+1))
                     self.logger.writer.add_scalars("learning_rate", {"learning_rate":self.optimizer.param_groups[0]['lr']}, (i+1))
-                    self.scheduler.step(val_epoch_loss)
+                    self.scheduler.step()
 
                 pbar.set_postfix({"loss":epoch_loss, "accuracy": epoch_acc, "val_loss":val_epoch_loss, "val_accuracy": val_epoch_acc})
 
