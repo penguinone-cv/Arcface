@@ -54,7 +54,7 @@ class DataLoader:
         train_data, val_data = utils.data.random_split(data, [train_size, val_size])    # torcn.utils.data.random_splitで重複なしにランダムな分割が可能
 
         # 学習データの読み込みを行うイテレータ
-        # shuffle    :学習データの順番をランダムに入れ替えるか(固定すると順番を記憶してしまう可能性があるためTrueにする)
+        # shuffle    :学習データの順番をランダムに入れ替えるか
         train_loader = utils.data.DataLoader(train_data,
                                                 batch_size=self.batch_size,
                                                 shuffle=True,
